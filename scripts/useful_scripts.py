@@ -2,13 +2,15 @@
 # Importing some important python modules
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.spatial
+import running_bins
 plt.rcParams.update({'font.size': 16})
 plt.rcParams['font.family'] = 'Courier'
 
 from astropy.io import ascii
-
-import os 
 import scipy
+import os 
+
 from PyAstronomy import pyasl
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -31,9 +33,12 @@ from dustmaps.edenhofer2023 import Edenhofer2023Query
 from dustmaps.config import config
 # Overplotting the RMs on the Planck foreground dust maps
 from reproject import reproject_from_healpix
+from skimage.transform import resize
+
 config['catalog_final_dir'] = '../catalog_final_files/'
 
 
+cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
 
 
 
@@ -856,7 +861,7 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
     Function to produce a plot of the whole field, along with the H-alpha intenity (and emission_measure), along with known pulsars in the region. 
     This is to obtain an estimate of the thermal electron density along the LOS. 
 
-    Calculates emission measure following Hill et al. 2009, who follow Reynolds (1991). 
+    Calculates emission measure following Hill et al. 2008, who follow Reynolds (1991). 
 
     Parameters
     ----------
@@ -905,7 +910,7 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
     pulsar_gal = pulsar_names.galactic
     em = 2.75*(T/1e+4)**(0.9) * (him)
     hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
-    hull_gal = hull_coords.galactic
+    #hull_coords.galactic = hull_coords.galactic.galactic
 
     
     cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
@@ -918,24 +923,34 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
         
         fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (20, 10))
         fig.patch.set_facecolor('white')
-        c = ax.imshow((him), vmin = 0, vmax = 50, cmap = 'plasma')
-        colorbar = plt.colorbar(c, ax = ax, pad = 0)
-        colorbar.set_label('H$\\alpha$ Intensity ($R$)')
+        c = ax.imshow((em), vmin = 0, vmax = 50, cmap = 'plasma')
+        colorbar = plt.colorbar(c, ax = ax, pad = 0.1)
+        colorbar.set_label('EM (pc cm$^{-6}$)')
         overlay = ax.get_coords_overlay('fk5')
         overlay.grid(color='white', ls='dotted')
-        overlay[0].set_axislabel('Right Ascension (J2000)')
-        overlay[1].set_axislabel('Declination (J2000)')
+        overlay[0].set_axislabel('RA (J2000)')
+        overlay[0].set_major_formatter('hh:mm:ss')
+        overlay[1].set_axislabel('DEC (J2000)')
+
         
-        c2 = ax.scatter(pulsar_gal.l, pulsar_gal.b, marker = '*', c = pulsar_distances, cmap = 'Oranges', transform = ax.get_transform('galactic'), label = 'Pulsars', s = 50)
+        #c2 = ax.scatter(pulsar_gal.l, pulsar_gal.b, marker = '*', c = pulsar_distances, cmap = 'Oranges', transform = ax.get_transform('galactic'), label = 'Pulsars', s = 50)
+        ax.scatter(pulsar_gal.l, pulsar_gal.b, marker = '*', c  = 'white', transform = ax.get_transform('galactic'), label = 'Pulsars', s = 100)
         ax.set_xlabel('$l$ (deg)')
-        colorbar2 = plt.colorbar(c2, ax = ax, pad = 0.12)
-        colorbar2.set_label('Distance (kpc)')
+        #colorbar2 = plt.colorbar(c2, ax = ax, pad = 0.12)
+        #colorbar2.set_label('Distance (kpc)')
         ax.set_ylabel('$b$ (deg)')
 
-        ax.plot(hull_gal.l * u.degree, hull_gal.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
-
+        ax.plot(hull_coords.galactic.l * u.degree, hull_coords.galactic.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        xlim = [min(hull_coords.galactic.l.value) - 0.18, max(pulsar_gal.l.value)+0.18]*u.deg
+        ylim = [min(pulsar_gal.b.value) - 0.18, max(pulsar_gal.b.value) +0.18]*u.deg
+        xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.invert_xaxis()
     
     if dispersion_measure == False and emission_measure == True:
+        fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (20, 10))
+        fig.patch.set_facecolor('white')
         c = ax.imshow((em), vmin = 0, vmax = 100, cmap = 'plasma')
         colorbar = plt.colorbar(c, ax = ax, pad = 0)
         colorbar.set_label('EM (pc cm$^{-6}$)')
@@ -948,7 +963,7 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
             label = None
         if dispersion_measure == False:
             
-            r_plotting = SphericalCircle((cluster_gal[i].l, cluster_gal[i].b),  (2* cluster_r500[i] * (u.Mpc) /scale).to(u.deg), linestyle = '-', facecolor = 'none', edgecolor = 'k', label = label, transform = ax.get_transform('galactic'))
+            r_plotting = SphericalCircle((cluster_gal[i].l, cluster_gal[i].b),  (2* cluster_r500[i] * (u.Mpc) /scale).to(u.deg), linestyle = '-', facecolor = 'none', edgecolor = 'red', label = label, transform = ax.get_transform('galactic'))
             ax.add_patch(r_plotting)
             ax.scatter(cluster_gal[i].l, cluster_gal[i].b, transform = ax.get_transform('galactic'), c = 'k', s= 0.1)
             plt.legend()
@@ -957,11 +972,12 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
     pulsar_pix_vals = wcs.world_to_array_index(pulsar_gal)
     pulsar_em = em[pulsar_pix_vals]
     max_ne = pulsar_em/pulsar_dms
+    labels = ['PSR J1357-2530', 'PSR J1455-3330', 'PSR J1505-2524']
     min_ne = (pulsar_em * np.sin(np.abs(np.deg2rad(pulsar_gal.b.value)))/scale_height) ** (1/2)
     mean_ne = (max_ne + min_ne) / 2 
     y_err = (max_ne - min_ne) /2
     if emission_measure == False and dispersion_measure == False:
-        plt.savefig('../figures/foreground_H_alpha.pdf', dpi = 300, bbox_inches = 'tight')
+        plt.savefig('../figures/foreground_EM.pdf', dpi = 300, bbox_inches = 'tight')
         plt.show()
         plt.close()
     if  emission_measure == True and dispersion_measure == True:
@@ -971,12 +987,13 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
         fig2, ax2 = plt.subplots(figsize=(5.84685039, 4.46338583))
         for i in range(len(pulsar_dms)):
             tot_err = ([min_ne[i]], [max_ne[i]]) 
-            print(min_ne[i])
-            ax2.errorbar(pulsar_dms[i], mean_ne[i], yerr = y_err[i], fmt = '.', capsize = 5, c = colors[i]) 
-        ax2.set_xlabel('DM (pc cm$^{-3}$)')
-        ax2.set_ylabel('$\langle n_e \\rangle$ ( cm$^{-3}$)') 
-
+            print(min_ne[i], max_ne[i], )
+            ax2.errorbar(pulsar_dms[i], mean_ne[i], yerr = y_err[i], fmt = '.', capsize = 5, c = colors[i], label = labels[i]) 
+        ax2.set_xlabel('DM$_\mathrm{pulsar}$ (pc cm$^{-3}$)')
+        ax2.set_ylabel('$\langle n_e \\rangle$ (cm$^{-3}$)') 
+        plt.legend()
         plt.savefig('../figures/EMvDM.pdf', dpi = 300, bbox_inches = 'tight')
+
         plt.show()
         plt.close()    
     
@@ -1015,10 +1032,10 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
             
             ax.set_aspect(1)
 
-        ax.plot(hull_gal.l * u.degree, hull_gal.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        ax.plot(hull_coords.galactic.l * u.degree, hull_coords.galactic.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
 
-        xlim = [min(hull_gal.l.value) - 0.1, max(hull_gal.l.value)+0.1]*u.deg
-        ylim = [min(hull_gal.b.value) - 0.1, max(hull_gal.b.value) +0.1]*u.deg
+        xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+        ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
         xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
@@ -1028,13 +1045,9 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
         plt.show()
         plt.close()
 
-
-        
         hutch_dm_map = fits.open('../data_files/Hutch_DM_reproj.fits')
         target_header = hutch_dm_map[0].header
         array = hutch_dm_map[0].data
-
-
 
         fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': WCS(target_header)}, figsize = (15, 5))
         #ax = plt.subplot(1,1,1, projection=WCS(target_header), frame_class=EllipticalFrame)
@@ -1065,10 +1078,10 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
             
             ax.set_aspect(1)
 
-        ax.plot(hull_gal.l * u.degree, hull_gal.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        ax.plot(hull_coords.galactic.l * u.degree, hull_coords.galactic.b * u.degree, 'r--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
 
-        xlim = [min(hull_gal.l.value) - 0.1, max(hull_gal.l.value)+0.1]*u.deg
-        ylim = [min(hull_gal.b.value) - 0.1, max(hull_gal.b.value) +0.1]*u.deg
+        xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+        ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
         xlim, ylim = WCS(target_header).world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
@@ -1077,25 +1090,856 @@ def diagnostic_plot(root, pulsar_names, pulsar_dms, pulsar_distances, cluster_ra
         plt.savefig('../figures/Hutsch_DM.pdf', dpi = 300, bbox_inches = 'tight')
         plt.show()
         plt.close()    
+def fil_checker(data, cluster_ras, cluster_decs, cluster_r500, fil_width = 1, cz = 0.0221, fig = None, ax = None):
+    '''
+    @author: Affan Khadir
+
+    Must recheck the plotting of clusters, filament, bridge region later!!!
+
+    Function to produce flags for when a particular point is on the same region of the sky as a filament
+
+    Parameters 
+    ----------
+    data: astropy.Table object
+        The table of the data (ra, dec, val)
+    cluster_ra: numpy array
+        Array with the ras of the clusters
+    cluster_dec: numpy array
+        Array with decs of the clusters
+    cluster_r500: numpy array
+        Array with r_500 of the clusters
+    fil_width: int or float 
+        The width of the filament (in Mpc)
+    cz: float 
+        The redshift of the object-of-interest
+    fig: matplotlib.pyplot figure object 
+        Matplotlib figure object for plotting. None by default
+    ax: matplotlib.pyplot axes object 
+        Matplotlib axes object for plotting. None by default
+    
+    Returns
+    -------
+    fil_flag: numpy array
+        Numpy array of booleans (1 for part of filament and 0 for not a part of the filament)
+    clust_flag: numpy array
+        Numpy array of booleans (1 for part of a cluster and 0 for not part of a cluster)
+    bridge_flag: numpy array
+        Numpy array of booleans (1 for part of a bride and not the whole filament, 0 for otherwise)
+    '''
+    cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
+
+    scale = cosmo.kpc_proper_per_arcmin(cz).to(u.Mpc/u.arcmin)
+
+    ra, dec = data['ra'], data['dec']
+
+    coords = SkyCoord(ra, dec, unit = 'deg')
+
+    cluster_points = SkyCoord(cluster_ras, cluster_decs, unit = 'deg')
+    fil_flag = np.zeros(len(data), dtype = bool)
+    cluster_flag = np.zeros(len(data), dtype = bool)
+    bridge_flag = np.zeros(len(data), dtype = bool)
+    x_array = []
+    y_array = []
+
+
+    for i in range(len(cluster_points)):
+        clust_new = np.delete(cluster_points, i)
+        separation = cluster_points[i].separation(clust_new)
+        min_index = np.argmin(separation)
+        m = (cluster_decs[i] - np.delete(cluster_decs, i)[min_index]) / (cluster_ras[i] - np.delete(cluster_ras, i)[min_index])
+        b = cluster_decs[i] - m * cluster_ras[i]
+        def linear(x, m, b): 
+            return m*x + b
+        x = np.linspace(cluster_ras[i],np.delete(cluster_ras, i)[min_index], 3000)
+        y = linear(x, m , b)
+        x_array = x_array + np.ndarray.tolist(x)
+        y_array  = y_array + np.ndarray.tolist(y)
+
+        vec = [cluster_ras[i] - np.delete(cluster_ras, i)[min_index], cluster_decs[i] - np.delete(cluster_decs, i)[min_index]]
+        unit_vec = vec/np.linalg.norm(vec)
+        perp_vec = np.array([-unit_vec[1], unit_vec[0]])
+
+        array_xy = [[x[j], y[j]] for j in range(len(x))]
+
+        up_line = array_xy + np.tile(perp_vec * (fil_width * (u.Mpc) / scale).to(u.deg).value, (len(x), 1))
+        up_x = up_line[:, 0]
+        up_y = up_line[:, 1]
+        down_line = array_xy - np.tile(perp_vec * (fil_width * (u.Mpc) / scale).to(u.deg).value, (len(x), 1))
+        down_x = down_line[:, 0]
+        down_y = down_line[:, 1]
+
+        if fig is not None: 
+            r_plotting = SphericalCircle((cluster_ras[i]* u.degree, cluster_decs[i]*u.degree),  (2* cluster_r500[i] * (u.Mpc) / scale).to(u.deg), linestyle = '--', facecolor = 'none', edgecolor = 'k', label = 'Clusters', transform = ax.get_transform('icrs'), lw = 10)
+            ax.add_patch(r_plotting)
+    
+    if fig is not None:
+        up_x_bridge = []
+        up_y_bridge = []
+        down_x_bridge = []
+        down_y_bridge = []
+        up_coords = SkyCoord(up_x * u.deg, up_y * u.deg)
+        down_coords = SkyCoord(down_x * u.deg, down_y * u.deg)
+        for j in range(len(up_x)):
+            if np.min((up_coords[j].separation(cluster_points) * scale).to(u.Mpc).value / np.array(cluster_r500)) < 2:
+                up_x_bridge.append(np.nan)
+                up_y_bridge.append(np.nan)
+            else:
+                up_x_bridge.append( up_x[j])
+                up_y_bridge.append( up_y[j])
+            if np.min((down_coords[j].separation(cluster_points) * scale).to(u.Mpc).value / np.array(cluster_r500)) < 2:
+                down_x_bridge.append(np.nan)
+                down_y_bridge.append(np.nan)
+            else: 
+                down_x_bridge.append( down_x[j])
+                down_y_bridge.append( down_y[j])
+        ax.plot(up_x_bridge, up_y_bridge, c = 'tomato', ls = '-.', label = 'Bridge', transform = ax.get_transform('icrs'), lw = 5)
+        ax.plot(down_x_bridge, down_y_bridge, c = 'tomato', ls = '-.', transform = ax.get_transform('icrs'), lw = 5)
+    
+
+    line_coords = SkyCoord(x_array, y_array, unit = 'deg')
+    for j in range(len(coords)): 
+            line_sep = min(coords[j].separation(line_coords))
+            cluster_seps = (coords[j].separation(cluster_points) * scale).to(u.Mpc).value / np.array(cluster_r500)
+            if (line_sep * scale).to(u.Mpc).value <= 1 or np.min(cluster_seps) <= 2:
+                fil_flag[j] = 1
+            if np.min(cluster_seps) <= 2:
+                cluster_flag[j] = 1
+            if (line_sep * scale).to(u.Mpc).value <= 1 and np.min(cluster_seps) > 2:
+                bridge_flag[j] = 1
+    return fil_flag, cluster_flag, bridge_flag
+
+def grm_plotting(root, interp_names, cluster_ras, cluster_decs, cluster_r500, cluster_z, cluster_names, cz = 0.0221): 
+    '''
+    Function for plotting the GRM map + the RRM plots from the map
+    Parameters
+    ----------
+    root: str 
+        The name of the root directory where the data is stored 
+    interp_name: list
+        A list containing the names of the directories with the different GRM interpolation techniques
+    cz: float
+        The redshift of the cluster. 0.0221 by default
+    cluster_ra: numpy array
+        Array with the ras of the clusters
+    cluster_dec: numpy array
+        Array with decs of the clusters
+    cluster_r500: numpy array
+        Array with r_500 of the clusters
+    cluster_z: numpy array
+        Array with the redshift of the clusters (for plotting purposes)
+    Returns
+    -------
+    None 
+    '''
+    for interp_name in interp_names:
+        ra_linspace, dec_linspace = np.linspace(327.791667 - 400*0.0416666666667, 327.791667 + 400*0.0416666666667, 800), np.linspace(28.7708333 - 350 *0.0416666666667, 28.7708333 + 350 * 0.0416666666667, 700)
+        ra_meshgrid, dec_meshgrid = np.meshgrid(ra_linspace, dec_linspace)
+        positions = np.vstack([ra_meshgrid.ravel(), dec_meshgrid.ravel()])
+        ra_plotting, dec_plotting = positions[0], positions[1]
+        cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
+        scale = cosmo.kpc_proper_per_arcmin(cz).to(u.Mpc/u.arcmin)
+        catalog_final = Table.read(root + 'real_sky.fits')
+        ras = catalog_final['ra']
+        decs = catalog_final['dec']
+        coords = SkyCoord(ras * u.deg, decs * u.deg, frame = 'icrs')
+
+
+        points = np.vstack((ras, decs)).T
+
+
+        hull = scipy.spatial.ConvexHull(points)
+
+        radio_image_name = root + 'image.i.EMU_1412-28.SB50413.cont.taylor.0.restored.conv.fits'
+        dm_name = root + 'DM_Khadir_map.fits'
+        radio = fits.open(radio_image_name)
+        dm = fits.open(dm_name)
+        wcs_radio = WCS(radio[0].header).celestial
+        wcs = WCS(dm[0].header)
+        if 'yma' in interp_name: 
+            name = 'mask'
+            plot_name = 'Masked GRM reconstruction'
+            plot_new_name = 'Masked GRM correction'
+        else:
+            name = 'no_mask'
+            plot_name = 'Unmasked GRM reconstruction'
+            plot_new_name = 'Unmasked GRM correction'
+        
+        
+        grm = np.load(interp_name).T
+        dm_name = root + 'DM_Khadir_map.fits'
+        dm = fits.open(dm_name)
+        wcs_dm = WCS(dm[0].header)
+        hdu_out = fits.open(root+'Hutch_RM_cutout.fits')[0]
+        wcs = WCS(hdu_out.header)
+        fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+        fig.patch.set_facecolor('white')
+        pixel_x, pixel_y = np.meshgrid(np.arange(hdu_out.data.shape[1]), np.arange(hdu_out.data.shape[0])) # Check if the 1 and 0 should be the other way around
+
+        pixel_positions = np.vstack([pixel_x.ravel(), pixel_y.ravel()])
+    
+        world_positions = wcs.pixel_to_world(pixel_positions[0], pixel_positions[1])
+        
+        ra_linspace, dec_linspace = np.linspace(327.791667 - 400*0.0416666666667, 327.791667 + 400*0.0416666666667, 800), np.linspace(28.7708333 - 350 *0.0416666666667, 28.7708333 + 350 * 0.0416666666667, 700)
+        ra_meshgrid, dec_meshgrid = np.meshgrid(ra_linspace, dec_linspace)
+        positions = np.vstack([ra_meshgrid.ravel(), dec_meshgrid.ravel()])
+
+        tree = scipy.spatial.cKDTree(positions.T)
+
+        
+        points = np.array([world_positions.l, world_positions.b]).T
+        distances, indices = tree.query(points)
+
+        c = ax.imshow(np.reshape(grm.flatten()[indices], hdu_out.data.shape), cmap = 'seismic', vmin = -40, vmax = 40)
+        colorbar = plt.colorbar(c, ax = ax)
+        colorbar.set_label('GRM (rad m$^{-2}$)')
+        ax.set_xlabel('$l$ (deg)')
+        ax.set_ylabel('$b$ (deg)')
+        points = np.vstack((ras, decs)).T
+        hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
+        ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        cluster_coords = SkyCoord(cluster_ras * u.deg, cluster_decs* u.deg, frame = 'icrs')
+        cluster_gal_coords = cluster_coords.galactic
+        for i in range(len(cluster_ras)):
+            scale_clust = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.Mpc/u.arcmin)
+            if i ==0 :
+                label = 'Clusters'
+            else: 
+                label = None
+            r_plotting = SphericalCircle((cluster_gal_coords[i].l, cluster_gal_coords[i].b),  (2* cluster_r500[i] * (u.Mpc) / scale_clust).to(u.deg), linestyle = '--', facecolor = 'none', edgecolor = 'red', label = label, transform = ax.get_transform('galactic'), lw = 1)
+            ax.add_patch(r_plotting)
+        ax.set_aspect(1)
+        xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+        ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+        xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.invert_xaxis()
+        plt.legend()
+        ax.set_aspect(1)
+        plt.title(plot_name) 
+        plt.savefig('../figures/DM_'+name+'_grm_big.pdf', dpi = 300, bbox_inches = 'tight')
+        plt.show()
+        plt.close()
+
+        tree = scipy.spatial.cKDTree(positions.T)
+        points = SkyCoord(ras * u.deg, decs*u.deg, frame = 'icrs').galactic
+        
+        points = np.array([points.l, points.b]).T
+        distances, indices = tree.query(points)
+
+        rrm_corr = catalog_final['rm'] - grm.flatten()[indices]
+        catalog_final['rrm_'+name] = rrm_corr
+        
+        fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs_radio}, figsize = (15, 5))
+        fig.patch.set_facecolor('white')
+
+
+        c = ax.scatter(ras, decs, s = 30, c = rrm_corr, transform = ax.get_transform('icrs'), cmap = 'seismic', vmin = -40, vmax = 40)
+        colorbar = plt.colorbar(c, ax = ax)
+        colorbar.set_label('RRM (rad m$^{-2}$)')
+        ax.set_xlabel('RA (J2000)')
+        ax.set_ylabel('DEC (J2000)')
+    
+
+        cluster_coords = SkyCoord(cluster_ras * u.deg, cluster_decs* u.deg, frame = 'icrs')
+        cluster_gal_coords = cluster_coords.galactic
+        for i in range(len(cluster_ras)):
+            scale_clust = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.Mpc/u.arcmin)
+            if i ==0 :
+                label = 'Clusters'
+            else: 
+                label = None
+            r_plotting = SphericalCircle((cluster_coords[i].ra, cluster_coords[i].dec),  (2* cluster_r500[i] * (u.Mpc) / scale_clust).to(u.deg), linestyle = '--', facecolor = 'none', edgecolor = 'k', label = label, transform = ax.get_transform('icrs'), lw = 1)
+            ax.add_patch(r_plotting)
+        ax.set_aspect(1)
+        xlim = [min(hull_coords.ra.value) - 0.1, max(hull_coords.ra.value)+0.1]*u.deg
+        ylim = [min(hull_coords.dec.value) - 0.1, max(hull_coords.dec.value) +0.1]*u.deg
+        xlim, ylim = wcs_radio.world_to_pixel(SkyCoord(xlim, ylim, frame = 'icrs'))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.invert_xaxis()
+        plt.legend()
+        plt.title(plot_new_name)
+        plt.savefig('../figures/DM_'+name+'_rrm.pdf', dpi = 300, bbox_inches = 'tight')
+        plt.show()
+        plt.close()
+
+        catalog_final.write(root + 'real_sky.fits', overwrite = True)
+
+    # plotting the scatter plot for all the clusters 
+
+    rm_names = ['rm', 'rrm_mask', 'rrm_no_mask']
+    plot_names = ['RM', 'Unmasked GRM correction', 'Masked GRM correction']
+    plot_colors = ['#1f77b4', 'tomato', 'k']
+    
+    for i in range(len(cluster_ras)):
+        A3581_center_coords = SkyCoord(cluster_ras[i] * u.deg, cluster_decs[i] * u.deg, frame = 'icrs')
+        scale_clust = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.Mpc/u.arcmin)
+        rs = (A3581_center_coords.separation(coords) * scale_clust).to(u.Mpc).value 
+        table = Table()
+        table['r'] = rs[rs < 2 * cluster_r500[i]]
+        
+        table['rrm_err'] = catalog_final['rm_err'][rs < 2 * cluster_r500[i]]
+        
+        iqr = 0
+        plt.figure(facecolor='white', figsize = (5.84685039, 4.46338583))
+        if len(table) > 0:
+            for j in range(len(rm_names)):
+                table['rrm'] = catalog_final[rm_names[j]][rs < 2 * cluster_r500[i]]
+            
+                # Do the calculation
+                x_running_in, scatter_in, scatter_errlow_in, scatter_errup_in = running_bins.calc_running_scatter(table
+                                                                        , RMcol='rrm' # column containing RRM
+                                                                        , xcol='r' # column containing distance to cluster
+                                                                        , RMerrcol = 'rrm_err' # column containing RRM error
+                                                                        # , xwidth=0.3 # in units of whatever is 'xcol' in
+                                                                        , xwidth=None # if we want set number of points
+                                                                        , M = 20     # number of points in sliding window
+                                                                        , method='iqr' # IQR is more robust than STD
+                                                                        , show=False
+                                                                        , sigmaRMextr = 0 # change this value to what scatter is far inside clusters
+                                                                                        # corrected for measurement errors!
+                                                                        ,plotwidth = False
+                                                                        ,plotleftbound = False
+                                                                        , plot_scatter = False 
+                                                                        )
+                
+                
+                plt.fill_between(x_running_in, scatter_in - scatter_errlow_in, scatter_in + scatter_errup_in ,alpha=0.2, color=plot_colors[j])
+                plt.plot(x_running_in, scatter_in , color=plot_colors[j], label = plot_names[j])
+            plt.ylabel(r"$\sigma_\mathrm{RRM, corr}$ (rad m$^{-2}$)")
+            plt.xlabel('$r$ (Mpc)')
+            plt.title(cluster_names[i] + ' RRM scatter')
+            plt.legend()
+            plt.savefig('../figures/real_'+cluster_names[i]+'.pdf', dpi = 300, bbox_inches = 'tight')
+            plt.show()
+            plt.close()
+
+    fil_flag, cluster_flag, bridge_flag = fil_checker(catalog_final, cluster_ras, cluster_decs, cluster_r500)
+    cluster_rms = [catalog_final['rm'][cluster_flag], catalog_final['rrm_mask'][cluster_flag], catalog_final['rrm_no_mask'][cluster_flag]]
+    bridge_rms = [catalog_final['rm'][bridge_flag], catalog_final['rrm_mask'][bridge_flag], catalog_final['rrm_no_mask'][bridge_flag]]
+    off_fil_rms = [catalog_final['rm'][~fil_flag], catalog_final['rrm_mask'][~fil_flag], catalog_final['rrm_no_mask'][~fil_flag]]
+
+    mean_array = [[], [], []]
+    mean_err_array = [[], [], []]
+    std_array = [[], [], []]
+    std_err_array = [[], [], []]
+    for i in range(len(cluster_rms)):
+        mean_array[i].append(np.mean(np.abs(cluster_rms[i])))
+        mean_err_array[i].append(np.sqrt(np.sum((catalog_final['rm_err'][cluster_flag])**2))/len(np.abs(cluster_rms[i])))
+        numerator = np.sqrt(np.sum(((cluster_rms[i] - np.mean(cluster_rms[i]))**2) * (catalog_final['rm_err'][cluster_flag]**2)))
+        sigma_s = numerator / ((len(cluster_rms[i]) - 1) * np.std(cluster_rms[i]))
+
+        std_array[i].append(np.std(cluster_rms[i]))
+        std_err_array[i].append(sigma_s)
+
+        mean_array[i].append(np.mean(np.abs(bridge_rms[i])))
+        mean_err_array[i].append(np.sqrt(np.sum((catalog_final['rm_err'][bridge_flag])**2))/len(np.abs(bridge_rms[i])))
+        numerator = np.sqrt(np.sum(((bridge_rms[i] - np.mean(bridge_rms[i]))**2) * (catalog_final['rm_err'][bridge_flag]**2)))
+        sigma_s = numerator / ((len(bridge_rms[i]) - 1) * np.std(bridge_rms[i]))
+        std_array[i].append(np.std(bridge_rms[i]))
+        std_err_array[i].append(sigma_s)
+
+        mean_array[i].append(np.mean(np.abs(off_fil_rms[i])))
+        mean_err_array[i].append(np.sqrt(np.sum((catalog_final['rm_err'][~fil_flag])**2))/len(np.abs(off_fil_rms[i])))
+        numerator = np.sqrt(np.sum(((off_fil_rms[i] - np.mean(off_fil_rms[i]))**2) * (catalog_final['rm_err'][~fil_flag]**2)))
+        sigma_s = numerator / ((len(off_fil_rms[i]) - 1) * np.std(off_fil_rms[i]))
+        std_array[i].append(np.std(off_fil_rms[i]))
+        std_err_array[i].append(sigma_s)
+
+    mean_array = np.array(mean_array)
+    std_array = np.array(std_array)
+    print(mean_err_array)
+    print(std_err_array)
+    #np.save('../data_files/mean_array.npy', mean_array)
+    #np.save('../data_files/std_array.npy', std_array)
 
 
 
-      
+    
+def pix_to_world(ra_pix, dec_pix, ra_cen, dec_cen, z, pixsize, N_pix):
+    '''
+    Convert pixel coordinates to world coordinates (RA/Dec).
 
-cluster_ras = [208.57704, 214.61075, 217.45457, 211.8742]
-cluster_decs = [-26.89382, -27.37885, -29.74854, -27.0178]
-cluster_r500 = [0.625, 0.8251953125, 0.52197265625, 0.925]
+    Parameters
+    ----------
+    ra_pix, dec_pix : arrays
+        Pixel coordinates.
+    ra_cen, dec_cen : float
+        RA/Dec of center.
+    z : float
+        Redshift of object.
+    pixsize : float
+        Pixel size in Mpc.
+    N_pix : int
+        Size of the image (assumes square).
 
-# Pulsars found at this ATNF Query: https://www.atnf.csiro.au/research/pulsar/psrcat/proc_form.php?version=2.6.0&Name=Name&RAJ=RAJ&DecJ=DecJ&DM=DM&RM=RM&Dist=Dist&startUserDefined=true&sort_attr=jname&sort_order=asc&condition=&coords_unit=raj%2Fdecj&radius=10&coords_1=14+24+02.655&coords_2=+-27+58+50.640&raddist=raddist&pulsar_names=&ephemeris=short&style=publication+quality&no_value=HEY&fsize=3&table_submit=&x_axis=&x_scale=linear&y_axis=&y_scale=linear&state=query
-pulsar_coords = SkyCoord([209.35, 223.94990332083333, 226.34387083333334] * u.deg, [-25.510833333333334, -33.51289083333333, -25.413916666666665] * u.deg, frame = 'icrs') # Bhat et al. (2023), EPTA Collaboration (2023),  Fiore et al. (2023)
-pulsar_dms = np.array([16.046, 13.569, 44.79])
-pulsar_distances = np.array([0.8, 0.76, 1.9]) # in kpc taken from the above papers
+    Returns
+    -------
+    ra_world, dec_world : arrays
+        World coordinates in degrees.
+    '''
+    from astropy.cosmology import Planck18 as cosmo
+    import astropy.units as u
 
-colors = ['g', 'b', 'r']
+    scale = cosmo.kpc_proper_per_arcmin(z).to(u.kpc/u.deg).value  # Mpc per arcmin
+    arcmin_per_pix = pixsize / scale
+
+    offset_ra = ra_pix - N_pix // 2
+    offset_dec = dec_pix - N_pix // 2
+
+    ra_world = ra_cen + arcmin_per_pix * offset_ra
+    dec_world = dec_cen + arcmin_per_pix * offset_dec
+
+    return ra_world, dec_world
 
 
-#dust_maps_plotting('../catalog_final_files/POSSUM_cat_final.fits', '../catalog_final_files/image.i.EMU_1412-28.SB50413.cont.taylor.0.restored.conv.fits', cluster_ras, cluster_decs, cluster_r500)
-#complexity_plots('../data_files/')
 
-diagnostic_plot('../data_files/', pulsar_coords, pulsar_dms, pulsar_distances, cluster_ras, cluster_decs, cluster_r500, emission_measure=False, dispersion_measure = True)
+def Power_Spectrum(val):
+    """
+    Compute the isotropically averaged 2D Fourier power spectrum of a rectangular array.
 
+    Parameters
+    ----------
+    val : 2D numpy array
+        The input field (e.g., RM map).
+
+    Returns
+    -------
+    kvals : 1D numpy array
+        The binned wave numbers.
+    amp_bins : 1D numpy array
+        The binned (averaged) power amplitudes.
+    """
+    ny, nx = val.shape  # allow rectangular shape
+
+    fourier_val = np.fft.fft2(val)
+    fourier_amplitudes = np.abs(fourier_val)**2
+
+    kx = np.fft.fftfreq(nx) * nx
+    ky = np.fft.fftfreq(ny) * ny
+    kx2D, ky2D = np.meshgrid(kx, ky)
+
+    knrm = np.sqrt(kx2D**2 + ky2D**2).flatten()
+    power = fourier_amplitudes.flatten()
+
+    kbins = np.arange(0.5, min(nx, ny)//2 + 1, 1.0)
+    kvals = 0.5 * (kbins[1:] + kbins[:-1])
+    amp_bins, _, _ = scipy.stats.binned_statistic(knrm, power, statistic='mean', bins=kbins)
+
+    # Optional normalization by shell area in k-space
+    amp_bins *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
+
+    return kvals, amp_bins
+
+def sim_sky(root, interp_names):
+    '''
+    Function to produce the plots of the turbulent foreground, along with the simulated clusters super-imposed on them
+
+    Parameters
+    ----------
+    root: str 
+        The name of the root directory where the data is stored
+
+    Returns
+    -------
+    None
+    '''
+    catalog_final = Table.read(root+'POSSUM_cat_final.fits')
+
+    hdu_out = fits.open(root+'Hutch_RM_cutout.fits')[0]
+
+    radio = fits.open(root+'image.i.EMU_1412-28.SB50413.cont.taylor.0.restored.conv.fits')
+    wcs = WCS(radio[0].header).celestial
+
+    ra = catalog_final['ra']
+    dec = catalog_final['dec']
+    coords = np.vstack((ra, dec)).T
+
+
+    hull = scipy.spatial.ConvexHull(coords)
+
+    radio_image_name =  root+'image.i.EMU_1412-28.SB50413.cont.taylor.0.restored.conv.fits'
+
+    radio = fits.open(radio_image_name)
+
+    wcs_radio = WCS(radio[0].header).celestial
+    wcs = WCS(hdu_out.header)
+
+    fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+    fig.patch.set_facecolor('white')
+
+    ax.set_xlabel('$l$ (deg)')
+    ax.set_ylabel('$b$ (deg)')
+    hull_coords = SkyCoord(coords[hull.vertices,0] * u.degree, coords[hull.vertices,1] * u.degree, frame = 'icrs')
+    ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+    c = ax.imshow(hdu_out.data, cmap = 'seismic', vmin = -40, vmax = 40)
+    colorbar = plt.colorbar(c, ax = ax)
+    colorbar.set_label('GRM (rad m$^{-2}$)')
+    ax.set_aspect(1)
+    xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+    ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+    xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.invert_xaxis()
+    plt.title('Hutschenreuter GRM')
+    plt.savefig('../figures/hutsch_grm.pdf', dpi = 300, bbox_inches = 'tight')
+    plt.show()
+    plt.close()
+
+    
+
+    RM_turb_files = glob(root+'RM_turb*')
+
+
+    turb_foreground = np.zeros((512 * 8, 512 *6))
+    for i  in range(8):
+        for j in range(6):
+            turb_foreground[i * 512: (i+1) * 512, j * 512 : (j+1) * 512] = np.load(RM_turb_files[np.random.randint(0, len(RM_turb_files) - 1)])
+
+    turb_foreground = resize(turb_foreground, hdu_out.shape)
+
+    fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+    fig.patch.set_facecolor('white')
+    ax.set_xlabel('$l$ (deg)')
+    ax.set_ylabel('$b$ (deg)')
+
+    points = np.vstack((ra, dec)).T
+    hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
+    ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+    turb_foreground = (turb_foreground / np.max(np.abs(turb_foreground))) * 10 
+    c = ax.imshow(hdu_out.data + turb_foreground, cmap = 'seismic', vmin = -40, vmax = 40)
+    colorbar = plt.colorbar(c, ax = ax)
+    colorbar.set_label('GRM (rad m$^{-2}$)')
+    ax.set_aspect(1)
+    xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+    ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+    xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.invert_xaxis()
+    plt.title('Hutschenreuter GRM + Turbulence')
+    plt.savefig('../figures/hutsch_grm+turb.pdf', dpi = 300, bbox_inches = 'tight')
+    plt.show()
+    plt.close()
+    cluster_files = ['A3581_RMimage.npy', 'WHJ135418_RMimage.npy', 'WHJ141826_RMimage.npy', 'WHJ142949_RMimage.npy']
+    cluster_r500 = [925, 625, 825, 522] #in kpc
+    cluster_z = [0.0221, 0.02, 0.0257, 0.0230]
+    cluster_ra = [211.8742, 208.57704, 214.61075, 217.45457]
+    cluster_dec = [-27.0178, -26.89382, -27.37885, -29.74854]
+    cluster_coords = SkyCoord(cluster_ra *u.deg, cluster_dec * u.deg)
+    cluster_gal_coords = cluster_coords.galactic
+    rm_res_array = []
+    grm_array = []
+    staps = fits.open(root + 'RMp.fits')
+    wcs_staps = WCS(staps[0].header)
+    for interp in interp_names:
+        grm = np.load(interp).T
+        if 'yma' in interp:
+            plot_name = 'Masked GRM reconstruction'
+            store_name = 'yma'
+
+        else:
+            plot_name = 'Unmasked GRM reconstruction'
+            store_name = 'nma'
+
+        dm_name = root + 'DM_Khadir_map.fits'
+        dm = fits.open(dm_name)
+        wcs_dm = WCS(dm[0].header)
+
+
+        pixel_x, pixel_y = np.meshgrid(np.arange(hdu_out.data.shape[1]), np.arange(hdu_out.data.shape[0])) 
+        pixel_x_staps, pixel_y_staps = np.meshgrid(np.arange(staps[0].data.shape[1]), np.arange(staps[0].data.shape[0]))
+        pixel_positions = np.vstack([pixel_x.ravel(), pixel_y.ravel()])
+        pixel_positions_staps = np.vstack([pixel_x_staps.ravel(), pixel_y_staps.ravel()])
+
+    
+        world_positions = wcs.pixel_to_world(pixel_positions[0], pixel_positions[1])
+        world_positions_staps = wcs_staps.pixel_to_world(pixel_positions_staps[0], pixel_positions_staps[1], 0)[0]
+        
+        
+        ra_linspace, dec_linspace = np.linspace(327.791667 - 400*0.0416666666667, 327.791667 + 400*0.0416666666667, 800), np.linspace(28.7708333 - 350 *0.0416666666667, 28.7708333 + 350 * 0.0416666666667, 700)
+        ra_meshgrid, dec_meshgrid = np.meshgrid(ra_linspace, dec_linspace)
+        positions = np.vstack([ra_meshgrid.ravel(), dec_meshgrid.ravel()])
+
+        tree = scipy.spatial.cKDTree(positions.T)
+
+        
+        points = np.array([world_positions.l, world_positions.b]).T
+        
+
+        points_staps = np.array([world_positions_staps.galactic.l, world_positions_staps.galactic.b]).T
+        tree_staps = scipy.spatial.cKDTree(points_staps)
+        _, indices = tree.query(points)
+        _, indices_staps = tree_staps.query(points)
+
+        
+        hull_ra = hull_coords.icrs.ra.deg
+        hull_dec = hull_coords.icrs.dec.deg
+        hull_vertices = np.vstack([hull_ra, hull_dec]).T
+
+        # Convert all pixel positions to RA/Dec degrees
+        pixel_ra = world_positions.icrs.ra.deg
+        pixel_dec = world_positions.icrs.dec.deg
+        points = np.vstack([pixel_ra, pixel_dec]).T
+
+        pixel_ra_staps = world_positions_staps.ra.deg
+        pixel_dec_staps = world_positions_staps.dec.deg
+        points_staps = np.vstack([pixel_ra_staps, pixel_dec_staps]).T
+
+        # Create Delaunay triangulation for convex hull polygon
+        tri = scipy.spatial.Delaunay(hull_vertices)
+
+        # Boolean mask: True if pixel inside convex hull
+        in_hull = tri.find_simplex(points) >= 0
+        in_hull_staps = tri.find_simplex(points_staps) >=0 
+        rm_res = hdu_out.data.flatten() + turb_foreground.flatten() - grm.flatten()[indices]
+        staps_rms = staps[0].data.flatten()[indices_staps]
+        staps_rms_store = deepcopy(staps[0].data.flatten())
+        staps_rms_store[~in_hull_staps] = 0
+        staps_rms_store = staps_rms_store[indices_staps]
+        rm_res_store = deepcopy(rm_res)
+        rm_res_store[~in_hull] = 0
+
+        rm_res = np.reshape(rm_res, hdu_out.data.shape)
+        rm_res_store = np.reshape(rm_res_store, hdu_out.data.shape)
+        staps_rms = np.reshape(staps_rms, hdu_out.data.shape)
+        staps_rms_store = np.reshape(staps_rms_store, hdu_out.data.shape)
+        # Crop to bounding box
+        grm_cropped = deepcopy(grm.flatten()[indices])
+        grm_cropped[~in_hull] = 0
+        grm_cropped = np.reshape(grm_cropped, hdu_out.data.shape)
+
+        grm_array.append(grm_cropped)
+        rm_res_array.append(rm_res_store)
+
+
+
+        fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+        fig.patch.set_facecolor('white')
+        ax.set_xlabel('$l$ (deg)')
+        ax.set_ylabel('$b$ (deg)')
+        ra = catalog_final['ra']
+        dec = catalog_final['dec']
+        points = np.vstack((ra, dec)).T
+
+
+        hull = scipy.spatial.ConvexHull(points)
+        hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
+        ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        
+        c = ax.imshow(rm_res, cmap = 'seismic', vmin = -40, vmax = 40)
+        colorbar = plt.colorbar(c, ax = ax)
+        colorbar.set_label('Residual (rad m$^{-2}$)')
+        ax.set_aspect(1)
+        xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+        ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+
+        for i in range(len(cluster_files)):
+            if i ==0 :
+                label = 'Clusters'
+            else: 
+                label = None
+
+            scale = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.kpc/u.arcmin)
+            r_plotting = SphericalCircle((cluster_gal_coords[i].l, cluster_gal_coords[i].b),  (2* cluster_r500[i] * (u.kpc) / scale).to(u.deg), linestyle = '--', label = label, facecolor = 'none', edgecolor = 'k', transform = ax.get_transform('galactic'), lw = 1)
+            ax.add_patch(r_plotting)
+
+        xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.invert_xaxis()
+        plt.legend()
+        plt.title(plot_name + ' residual')
+        plt.savefig('../figures/res_' + store_name+ '.pdf', dpi = 300, bbox_inches = 'tight')
+        plt.show()
+        plt.close()
+
+        fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+        fig.patch.set_facecolor('white')
+        ax.set_xlabel('$l$ (deg)')
+        ax.set_ylabel('$b$ (deg)')
+        ra = catalog_final['ra']
+        dec = catalog_final['dec']
+        points = np.vstack((ra, dec)).T
+
+
+        hull = scipy.spatial.ConvexHull(points)
+        hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
+        ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+        
+        c = ax.imshow(hdu_out.data - staps_rms, cmap = 'seismic', vmin = -40, vmax = 40)
+        colorbar = plt.colorbar(c, ax = ax)
+        colorbar.set_label('RM (rad m$^{-2}$)')
+        ax.set_aspect(1)
+        xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+        ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+
+        for i in range(len(cluster_files)):
+            if i ==0 :
+                label = 'Clusters'
+            else: 
+                label = None
+
+            scale = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.kpc/u.arcmin)
+            r_plotting = SphericalCircle((cluster_gal_coords[i].l, cluster_gal_coords[i].b),  (2* cluster_r500[i] * (u.kpc) / scale).to(u.deg), linestyle = '--', label = label, facecolor = 'none', edgecolor = 'k', transform = ax.get_transform('galactic'), lw = 1)
+            ax.add_patch(r_plotting)
+
+        xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.invert_xaxis()
+        plt.legend()
+        plt.title('Hutschenreuter & STAPS residual')
+        plt.savefig('../figures/res_' + store_name+ '__hutsch_staps.pdf', dpi = 300, bbox_inches = 'tight')
+        plt.show()
+        plt.close()
+
+    fig, ax  = plt.subplots(figsize = (5.84685039, 4.46338583))
+    fig.patch.set_facecolor('white')
+    rm_cropped = deepcopy(hdu_out.data.flatten())
+    rm_cropped[~in_hull] = 0
+    rm_cropped = np.reshape(rm_cropped, hdu_out.data.shape)
+
+    kvals_sim, amp_bins_sim = Power_Spectrum(rm_cropped)
+    ax.plot(kvals_sim, amp_bins_sim, label = 'True GRM')
+    integral_sim = np.trapz(amp_bins_sim, kvals_sim)
+    labels = ['Masked GRM', 'Unmaksed GRM']
+    for i in range(len(grm_array)):
+        kvals, amp_bins = Power_Spectrum(grm_array[i])
+        ax.plot(kvals, amp_bins, label = labels[i])
+        integral_res = np.trapz(amp_bins / np.array(kvals), kvals) / integral_sim
+        print(integral_res)
+    ax.loglog()
+    ax.set_xlabel('$k$')
+    ax.set_ylabel('$\mathcal{P}(k)$')
+    plt.legend()
+    plt.title('Reconstruction Power Spectra')
+    plt.savefig('../figures/power.pdf', dpi = 300, bbox_inches = 'tight')
+    plt.show()
+    plt.close()
+
+    fig, ax  = plt.subplots(figsize = (5.84685039, 4.46338583))
+    fig.patch.set_facecolor('white')
+    labels = ['Masked GRM', 'Unmaksed GRM']
+    for i in range(len(rm_res_array)):
+        kvals, amp_bins = Power_Spectrum(rm_res_array[i])
+        ax.plot(kvals, amp_bins, label = labels[i])
+    ax.loglog()
+    ax.set_xlabel('$k$')
+    ax.set_ylabel('$\mathcal{P}(k)$')
+    plt.legend()
+    plt.title('Residual Power Spectra')
+    plt.savefig('../figures/power_res.pdf', dpi = 300, bbox_inches = 'tight')
+    plt.show()
+    plt.close()
+
+
+
+    fig, ax = plt.subplots(ncols=1, subplot_kw={'projection': wcs}, figsize = (15, 5))
+    fig.patch.set_facecolor('white')
+    ax.set_xlabel('$l$ (deg)')
+    ax.set_ylabel('$b$ (deg)')
+    hull_coords = SkyCoord(points[hull.vertices,0] * u.degree, points[hull.vertices,1] * u.degree, frame = 'icrs')
+    cluster_RMs = np.zeros(hdu_out.data.shape)
+
+    X, Y = np.meshgrid(np.arange(256), np.arange(256))
+    ra_pix, dec_pix = np.vstack([X.ravel(), Y.ravel()])[0], np.vstack([X.ravel(), Y.ravel()])[1]
+
+    
+    for i in range(len(cluster_files)):
+        ra_world, dec_world = pix_to_world(ra_pix, dec_pix, cluster_ra[i], cluster_dec[i], cluster_z[i], 16, 256)
+        coords = SkyCoord(ra_world * u.deg, dec_world * u.deg, frame = 'icrs')
+        coords_galactic = coords.galactic
+        ra_gal_pix, dec_gal_pix = wcs.world_to_pixel(coords_galactic)
+        ra_gal_pix, dec_gal_pix = ra_gal_pix.astype(int), dec_gal_pix.astype(int)
+        coords_pix = np.vstack((ra_gal_pix, dec_gal_pix)).T
+        current_rm = (np.load(root + cluster_files[i])).flatten()
+
+        unique_pix, inverse_idx = np.unique(coords_pix, axis=0, return_inverse=True)
+        rm_pix_final = np.zeros(len(unique_pix))
+
+        for j in range(len(unique_pix)):
+            rm_pix_final[j] = np.mean(current_rm[inverse_idx == j])
+
+        ra_pix_unique, dec_pix_unique = unique_pix.T[0], unique_pix.T[1]
+        if np.max(ra_pix_unique) < 461:
+            cluster_RMs[dec_pix_unique, ra_pix_unique] = rm_pix_final
+        if i ==0 :
+                label = 'Clusters'
+        else: 
+            label = None
+
+        scale = cosmo.kpc_proper_per_arcmin(cluster_z[i]).to(u.kpc/u.arcmin)
+        r_plotting = SphericalCircle((cluster_gal_coords[i].l, cluster_gal_coords[i].b),  (2* cluster_r500[i] * (u.kpc) / scale).to(u.deg), linestyle = '--', label = label, facecolor = 'none', edgecolor = 'red', transform = ax.get_transform('galactic'), lw = 1)
+        ax.add_patch(r_plotting)
+
+    ax.plot(hull_coords.galactic.l, hull_coords.galactic.b, 'k--', lw=2, transform = ax.get_transform('galactic'), label = 'POSSUM field')
+    c = ax.imshow(hdu_out.data + turb_foreground + cluster_RMs, cmap = 'seismic', vmin = -40, vmax = 40)
+
+    colorbar = plt.colorbar(c, ax = ax)
+    colorbar.set_label('RM (rad m$^{-2}$)')
+    ax.set_aspect(1)
+    xlim = [min(hull_coords.galactic.l.value) - 0.1, max(hull_coords.galactic.l.value)+0.1]*u.deg
+    ylim = [min(hull_coords.galactic.b.value) - 0.1, max(hull_coords.galactic.b.value) +0.1]*u.deg
+    xlim, ylim = wcs.world_to_pixel(SkyCoord(xlim, ylim, frame = 'galactic'))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.invert_xaxis()
+    plt.title('Hutschenreuter GRM + Turbulence + Clusters')
+    plt.legend()
+    plt.savefig('../figures/hutsch_grm+turb+clust.pdf', dpi = 300, bbox_inches = 'tight')
+    plt.show()
+    plt.close()
+
+    sim_sky_rm = hdu_out.data + turb_foreground + cluster_RMs
+    coords = SkyCoord(ra * u.deg, dec * u.deg)
+
+    coords_galactic = coords.galactic
+    ra_gal_pix, dec_gal_pix = wcs.world_to_pixel(coords_galactic)
+    ra_gal_pix, dec_gal_pix = ra_gal_pix.astype(int), dec_gal_pix.astype(int)
+    rm_simulated = sim_sky_rm[dec_gal_pix, ra_gal_pix]
+    rm_true = cluster_RMs[dec_gal_pix, ra_gal_pix]
+
+
+    sim_sky = Table()
+    sim_sky['ra'] = ra
+    sim_sky['dec'] = dec
+    sim_sky['rm'] = rm_simulated
+    sim_sky['rm_err'] = rm_simulated * 0.05
+    sim_sky['rm_true'] = rm_true
+    #sim_sky.write('../data_files/sim_sky.fits', overwrite = True)
+ 
+
+
+
+
+
+    
+
+ 
+if __name__ == "__main__":      
+    cluster_z = [0.0200, 0.0257, 0.0230, 0.0221]
+    cluster_ras = [208.57704, 214.61075, 217.45457, 211.8742]
+    cluster_decs = [-26.89382, -27.37885, -29.74854, -27.0178]
+    cluster_r500 = [0.625, 0.8251953125, 0.52197265625, 0.925]
+    cluster_names = ['WHJ135418', 'WHJ140927', 'WHJ142949', 'A3581']
+
+    # Pulsars found at this ATNF Query: https://www.atnf.csiro.au/research/pulsar/psrcat/proc_form.php?version=2.6.0&Name=Name&RAJ=RAJ&DecJ=DecJ&DM=DM&RM=RM&Dist=Dist&startUserDefined=true&sort_attr=jname&sort_order=asc&condition=&coords_unit=raj%2Fdecj&radius=10&coords_1=14+24+02.655&coords_2=+-27+58+50.640&raddist=raddist&pulsar_names=&ephemeris=short&style=publication+quality&no_value=HEY&fsize=3&table_submit=&x_axis=&x_scale=linear&y_axis=&y_scale=linear&state=query
+    pulsar_coords = SkyCoord([209.35, 223.94990332083333, 226.34387083333334] * u.deg, [-25.510833333333334, -33.51289083333333, -25.413916666666665] * u.deg, frame = 'icrs') # Bhat et al. (2023), EPTA Collaboration (2023),  Fiore et al. (2023)
+    pulsar_dms = np.array([16.046, 13.569, 44.79])
+    pulsar_distances = np.array([0.8, 0.76, 1.9]) # in kpc taken from the above papers
+
+    colors = ['g', 'b', 'r']
+    sim_sky('../data_files/', ['../data_files/grm_sim_yma_yex.npy', '../data_files/grm_sim_nma_yex.npy'])
+
+    #grm_plotting('../data_files/', ['../data_files/grm_yma_yex.npy', '../data_files/grm_nma_yex.npy'], cluster_ras, cluster_decs, cluster_r500, cluster_z, cluster_names)
+
+
+    #dust_maps_plotting('../catalog_final_files/POSSUM_cat_final.fits', '../catalog_final_files/image.i.EMU_1412-28.SB50413.cont.taylor.0.restored.conv.fits', cluster_ras, cluster_decs, cluster_r500)
+    #complexity_plots('../data_files/')
+
+    #diagnostic_plot('../data_files/', pulsar_coords, pulsar_dms, pulsar_distances, cluster_ras, cluster_decs, cluster_r500, emission_measure=True, dispersion_measure = True)
+
+   
